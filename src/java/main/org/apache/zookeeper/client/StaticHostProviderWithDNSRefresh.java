@@ -28,7 +28,8 @@ public class StaticHostProviderWithDNSRefresh implements HostProvider {
 
     private final boolean shouldRefreshDNS;
 
-    private final ScheduledExecutorService executorService;
+    // Use static thread pool to limit the number of DNS refresh threads
+    private static final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
 
     /**
      * Constructs a SimpleHostSet.
@@ -46,9 +47,10 @@ public class StaticHostProviderWithDNSRefresh implements HostProvider {
         shouldRefreshDNS = checkUnresolvedAddresses(serverAddresses);
         if (shouldRefreshDNS) {
             unresolvedHosts = new ArrayList<InetSocketAddress>(serverAddresses);
+            // shuffle to make sure each zookeeper server gets even request distribution
+            // on client start up
             Collections.shuffle(unresolvedHosts);
             staticProvider = null;
-            executorService = Executors.newScheduledThreadPool(1);
             refreshDNS();
             LOG.info("Initial zookeeper server addresses: {}", cachedServerAddresses);
             if (serverAddresses.isEmpty()) {
@@ -58,7 +60,7 @@ public class StaticHostProviderWithDNSRefresh implements HostProvider {
             executorService.scheduleWithFixedDelay(new Runnable() {
                 @Override
                 public void run() {
-                    LOG.debug("DNS refresh started");
+                    LOG.debug("DNS refresh started for hosts {}", unresolvedHosts);
                     refreshDNS();
                 }
             }, 30, 30, TimeUnit.SECONDS);
@@ -66,7 +68,6 @@ public class StaticHostProviderWithDNSRefresh implements HostProvider {
             LOG.warn("Will skip DNS refresh as IP addresses exist in initial server addresses: {}", serverAddresses);
             unresolvedHosts = null;
             staticProvider = new StaticHostProvider(serverAddresses);
-            executorService = null;
         }
     }
 
